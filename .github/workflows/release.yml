@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags: "*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Use Node.js 24.12.0
+        uses: actions/setup-node@v1
+        with:
+          node-version: 24.12.0
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish

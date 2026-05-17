@@ -1,0 +1,18 @@
+{
+    "extends": "../tsconfig.json",
+    "compilerOptions": {
+        "rootDir": "..",
+        "types": ["node", "jest"],
+        "baseUrl": "."
+    },
+    "include": [".", "../src"],
+    "exclude": [
+        "translation/transformation",
+        "cli/errors",
+        "cli/watch",
+        "transpile/directories",
+        "transpile/outFile",
+        "../src/lualib",
+        "../language-extensions"
+    ]
+}

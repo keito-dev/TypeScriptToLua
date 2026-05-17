@@ -1,0 +1,29 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`should be able to resolve ({"name": "basic", "options": [Object]}) 1`] = `
+[
+  "directories/basic/src/lib/file.lua",
+  "directories/basic/src/main.lua",
+]
+`;
+
+exports[`should be able to resolve ({"name": "basic", "options": [Object]}) 2`] = `
+[
+  "directories/basic/out/lib/file.lua",
+  "directories/basic/out/main.lua",
+]
+`;
+
+exports[`should be able to resolve ({"name": "basic", "options": [Object]}) 3`] = `
+[
+  "directories/basic/src/lib/file.lua",
+  "directories/basic/src/main.lua",
+]
+`;
+
+exports[`should be able to resolve ({"name": "basic", "options": [Object]}) 4`] = `
+[
+  "directories/basic/out/lib/file.lua",
+  "directories/basic/out/main.lua",
+]
+`;

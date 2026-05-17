@@ -1,0 +1,45 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`should give verbose output 1`] = `
+[
+  "Loaded 0 plugins",
+  "Parsing project settings",
+  "Transforming <cwd>/test/transpile/project/otherFile.ts",
+  "Printing <cwd>/test/transpile/project/otherFile.ts",
+  "Transforming <cwd>/test/transpile/project/index.ts",
+  "Printing <cwd>/test/transpile/project/index.ts",
+  "Constructing emit plan",
+  "Resolving dependencies for <cwd>/test/transpile/project/otherFile.ts",
+  "Resolving dependencies for <cwd>/test/transpile/project/index.ts",
+  "Resolving "./otherFile" from <cwd>/test/transpile/project/index.ts",
+  "Resolved ./otherFile to <cwd>/test/transpile/project/otherFile.ts",
+  "Emitting output",
+  "Emitting <cwd>/test/transpile/project/otherFile.lua",
+  "Emitting <cwd>/test/transpile/project/index.lua",
+  "Emit finished!",
+]
+`;
+
+exports[`should transpile 1`] = `
+[
+  {
+    "filePath": "otherFile.lua",
+    "lua": "local ____exports = {}
+function ____exports.getNumber(self)
+    return getAPIValue()
+end
+return ____exports
+",
+  },
+  {
+    "filePath": "index.lua",
+    "lua": "local ____exports = {}
+local ____otherFile = require("otherFile")
+local getNumber = ____otherFile.getNumber
+local myNumber = getNumber(nil)
+setAPIValue(myNumber * 5)
+return ____exports
+",
+  },
+]
+`;

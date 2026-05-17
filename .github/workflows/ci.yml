@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: master
+  pull_request:
+
+env:
+  NODE_VERSION: 20.17.0
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm run lint
+        env:
+          CI: true
+
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 16.14.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm run build
+      - run: npx jest --maxWorkers 2 --coverage
+        env:
+          CI: true
+      - if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lua Install
+        run: sudo apt-get install lua5.3 luajit
+      - name: Add Brew to Path (Required since Nov 2022)
+        run: echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
+      - name: Glow Install
+        run: brew install glow
+      # Checkout master & commit
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: master
+      - name: Checkout commit
+        uses: actions/checkout@v4
+        with:
+          path: commit
+      - name: Use Node.js 16.14.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # NPM
+      # install and build master
+      - name: npm ci master
+        run: npm ci
+        working-directory: master
+      - name: Use local tstl language extensions
+        run: npm i lua-types@latest && npm i -D file:.
+        working-directory: master
+      - name: Build master
+        run: npm run build
+        working-directory: master
+      # install and build commit
+      - name: npm ci commit
+        run: npm ci
+        working-directory: commit
+      - name: Use local tstl language extensions
+        run: npm i -D file:.
+        working-directory: commit
+      - name: Build commit
+        run: npm run build
+        working-directory: commit
+      # Benchmark directory setup
+      - name: Ensure benchmark data dir exists
+        run: mkdir -p ./benchmark/data
+        working-directory: commit
+      - name: Copy commit benchmark to master
+        run: rm -rf ./master/benchmark && cp -rf ./commit/benchmark ./master/benchmark
+      # Run master benchmark first and output to commit benchmark data
+      - name: Build benchmark Lua 5.3 master
+        run: node ../dist/tstl.js -p tsconfig.53.json
+        working-directory: master/benchmark
+      - name: Run benchmark Lua 5.3 master
+        id: benchmark-lua-master
+        run: lua5.3 -- run.lua ../../../commit/benchmark/data/benchmark_master_53.json
+        working-directory: master/benchmark/dist
+      - name: Build benchmark LuaJIT master
+        run: node ../dist/tstl.js -p tsconfig.jit.json
+        working-directory: master/benchmark
+      - name: Run benchmark LuaJIT master
+        id: benchmark-jit-master
+        run: luajit -- run.lua ../../../commit/benchmark/data/benchmark_master_jit.json
+        working-directory: master/benchmark/dist
+      # Run commit benchmark and compare with master
+      - name: Build benchmark Lua 5.3 commit
+        run: node ../dist/tstl.js -p tsconfig.53.json
+        working-directory: commit/benchmark
+      - name: Run benchmark Lua 5.3 commit
+        id: benchmark-lua-commit
+        run: lua5.3 -- run.lua ../data/benchmark_master_vs_commit_53.json ../data/benchmark_master_53.json
+        working-directory: commit/benchmark/dist
+      - name: Build benchmark LuaJIT commit
+        run: node ../dist/tstl.js -p tsconfig.jit.json
+        working-directory: commit/benchmark
+      - name: Run benchmark LuaJIT commit
+        id: benchmark-jit-commit
+        run: luajit -- run.lua ../data/benchmark_master_vs_commit_jit.json ../data/benchmark_master_jit.json
+        working-directory: commit/benchmark/dist
+      - name: Combine benchmark results
+        id: script-combine-results
+        uses: actions/github-script@v7
+        with:
+          benchmark-result-path-lua: commit/benchmark/data/benchmark_master_vs_commit_53.json
+          benchmark-result-path-jit: commit/benchmark/data/benchmark_master_vs_commit_jit.json
+          result-encoding: string
+          script: |
+            const createBenchmarkCheck = require(`${process.env.GITHUB_WORKSPACE}/commit/.github/scripts/create_benchmark_check.js`);
+            return createBenchmarkCheck({ github, context, core });
+      - name: Benchmark results
+        run: echo "${{steps.script-combine-results.outputs.result}}" | glow -s dark -w 120 -

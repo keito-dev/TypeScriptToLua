@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "outDir": "../../dist/lualib/universal",
+        "target": "esnext",
+        "lib": ["esnext"],
+        "types": ["lua-types/5.4"],
+        "skipLibCheck": true,
+        "rootDirs": [".", "universal"],
+
+        "strict": true
+    },
+    "tstl": {
+        "luaLibImport": "none",
+        "noHeader": true,
+        "luaPlugins": [{ "name": "../../dist/lualib-build/plugin.js" }]
+    },
+    "include": ["*.ts", "universal/**/*.ts", "declarations/**/*.ts", "../../language-extensions/index.d.ts"]
+}

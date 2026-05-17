@@ -1,0 +1,13 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`forin[Array]: code 1`] = `
+"local ____exports = {}
+function ____exports.__main(self)
+    local array = {1, 2, 3}
+    for key in pairs(array) do
+    end
+end
+return ____exports"
+`;
+
+exports[`forin[Array]: diagnostics 1`] = `"main.ts(3,9): error TSTL: Iterating over arrays with 'for ... in' is not allowed."`;

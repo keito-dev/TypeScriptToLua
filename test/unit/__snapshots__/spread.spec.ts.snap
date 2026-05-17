@@ -1,0 +1,18 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`vararg spread optimization $multi 1`] = `
+"local ____exports = {}
+function ____exports.__main(self)
+    local function multi(self, ...)
+        return ...
+    end
+    local function test(self, ...)
+        return select(
+            2,
+            multi(nil, ...)
+        )
+    end
+    return test(nil, "a", "b", "c")
+end
+return ____exports"
+`;

@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "target": "esnext",
+        "lib": ["esnext"],
+        // Dev types are JIT
+        "types": ["lua-types/jit", "@typescript-to-lua/language-extensions"],
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "outDir": "dist",
+        "rootDir": "src",
+        "strict": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true
+    },
+    "include": ["src"]
+}
