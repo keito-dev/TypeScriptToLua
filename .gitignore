@@ -1,5 +1,5 @@
 node_modules
-/dist
+# /dist
 /coverage
 /test/transpile/module-resolution/**/dist
 /test/transpile/module-resolution/**/tsconfig.tsbuildinfo
