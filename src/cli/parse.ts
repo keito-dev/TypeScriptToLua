@@ -59,6 +59,23 @@ export const optionDeclarations: CommandLineOption[] = [
         choices: Object.values(LuaTarget),
     },
     {
+        name: "minify",
+        description: "Minify the generated Lua with luamin (whitespace, comments, scope-aware local renaming, single line).",
+        type: "boolean",
+    },
+    {
+        name: "obfuscate",
+        description:
+            "Obfuscate the generated Lua: scramble string literals and route global/native accesses through _G[...].",
+        type: "boolean",
+    },
+    {
+        name: "obfuscateInternals",
+        description:
+            "Bundle only; requires obfuscate. Also rename module names and tstl runtime symbols (__TS__*, ____*). Disable to keep them readable for debugging.",
+        type: "boolean",
+    },
+    {
         name: "noImplicitGlobalVariables",
         description:
             'Specify to prevent implicitly turning "normal" variants into global variables in the transpiled output.',

@@ -40,6 +40,7 @@ const CompilerOptions_1 = require("../CompilerOptions");
 const LuaPrinter_1 = require("../LuaPrinter");
 const transformation_1 = require("../transformation");
 const utils_1 = require("../utils");
+const minify_1 = require("./minify");
 const transformers_1 = require("./transformers");
 const performance = __importStar(require("../measure-performance"));
 function getProgramTranspileResult(emitHost, writeFileResult, { program, sourceFiles: targetSourceFiles, customTransformers = {}, plugins = [] }) {
@@ -90,6 +91,9 @@ function getProgramTranspileResult(emitHost, writeFileResult, { program, sourceF
         performance.startSection("transpile");
         const { file, diagnostics: transformDiagnostics } = (0, transformation_1.transformSourceFile)(program, sourceFile, visitorMap);
         diagnostics.push(...transformDiagnostics);
+        if (options.minify || options.obfuscate) {
+            (0, minify_1.applyLuaMinifyPasses)(file, options, emitHost);
+        }
         performance.endSection("transpile");
         if (!options.noEmit && !options.emitDeclarationOnly) {
             performance.startSection("print");

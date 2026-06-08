@@ -37,6 +37,9 @@ export interface TypeScriptToLuaOptions {
     luaTarget?: LuaTarget;
     luaLibImport?: LuaLibImportKind;
     luaPlugins?: Array<LuaPluginImport | InMemoryLuaPlugin>;
+    minify?: boolean;
+    obfuscate?: boolean;
+    obfuscateInternals?: boolean;
     noImplicitGlobalVariables?: boolean;
     noImplicitSelf?: boolean;
     noHeader?: boolean;

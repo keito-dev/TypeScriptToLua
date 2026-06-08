@@ -46,6 +46,8 @@ const LuaLib_1 = require("../LuaLib");
 const utils_1 = require("../utils");
 const bundle_1 = require("./bundle");
 const diagnostics_1 = require("./diagnostics");
+const obfuscate_internals_1 = require("./minify/obfuscate-internals");
+const luamin_minify_1 = require("./minify/luamin-minify");
 const plugins_1 = require("./plugins");
 const resolve_1 = require("./resolve");
 const transpile_1 = require("./transpile");
@@ -81,6 +83,21 @@ class Transpiler {
             if (plugin.beforeEmit) {
                 const beforeEmitPluginDiagnostics = (_a = plugin.beforeEmit(program, options, this.emitHost, emitPlan)) !== null && _a !== void 0 ? _a : [];
                 diagnostics.push(...beforeEmitPluginDiagnostics);
+            }
+        }
+        // First post-Lua pass: luamin minifies (whitespace + comments + scope-aware local rename + single
+        // line). It renames every tstl internal that is a local and drops the header, while preserving the
+        // obfuscation already applied by the printer (escaped strings, hex, bracket keys).
+        if (options.minify) {
+            for (const file of emitPlan) {
+                file.code = (0, luamin_minify_1.minifyWithLuamin)(file.code, options.luaTarget);
+            }
+        }
+        // Then hide what luamin leaves behind: module-name strings, the tstl symbol *keys* that survive as
+        // table fields (e.g. __TS__New), and the require shim. Runs after luamin and all text-scanning.
+        if (options.obfuscate && options.obfuscateInternals && (0, CompilerOptions_1.isBundleEnabled)(options)) {
+            for (const file of emitPlan) {
+                file.code = (0, obfuscate_internals_1.obfuscateBundleInternals)(file.code);
             }
         }
         const emitBOM = (_b = options.emitBOM) !== null && _b !== void 0 ? _b : false;

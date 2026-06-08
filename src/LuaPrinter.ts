@@ -6,6 +6,7 @@ import * as lua from "./LuaAST";
 import { loadImportedLualibFeatures, loadInlineLualibFeatures, LuaLibFeature } from "./LuaLib";
 import { isValidLuaIdentifier, shouldAllowUnicode } from "./transformation/utils/safe-names";
 import { EmitHost, getEmitPath } from "./transpilation";
+import { obfuscateLuaString } from "./transpilation/minify";
 import { intersperse, normalizeSlashes } from "./utils";
 
 // https://www.lua.org/pil/2.4.html
@@ -84,7 +85,14 @@ export interface PrintResult {
 
 export function createPrinter(printers: Printer[]): Printer {
     if (printers.length === 0) {
-        return (program, emitHost, fileName, file) => new LuaPrinter(emitHost, program, fileName).print(file);
+        return (program, emitHost, fileName, file) => {
+            const options = program.getCompilerOptions() as CompilerOptions;
+            const printer =
+                options.minify || options.obfuscate
+                    ? new MinifyingLuaPrinter(emitHost, program, fileName)
+                    : new LuaPrinter(emitHost, program, fileName);
+            return printer.print(file);
+        };
     } else if (printers.length === 1) {
         return printers[0];
     } else {
@@ -764,13 +772,16 @@ export class LuaPrinter {
         return this.createSourceNode(expression, chunks);
     }
 
-    private printExpressionInParenthesesIfNeeded(expression: lua.Expression, minPrecedenceToOmit?: number): SourceNode {
+    protected printExpressionInParenthesesIfNeeded(
+        expression: lua.Expression,
+        minPrecedenceToOmit?: number
+    ): SourceNode {
         return this.needsParenthesis(expression, minPrecedenceToOmit)
             ? this.createSourceNode(expression, ["(", this.printExpression(expression), ")"])
             : this.printExpression(expression);
     }
 
-    private needsParenthesis(expression: lua.Expression, minPrecedenceToOmit?: number): boolean {
+    protected needsParenthesis(expression: lua.Expression, minPrecedenceToOmit?: number): boolean {
         if (lua.isBinaryExpression(expression) || lua.isUnaryExpression(expression)) {
             return (
                 minPrecedenceToOmit === undefined ||
@@ -948,5 +959,145 @@ export class LuaPrinter {
         build(rootSourceNode);
 
         return map;
+    }
+}
+
+/**
+ * A LuaPrinter that applies the lexical (print-time, zero runtime cost) half of the minify/obfuscate
+ * feature. The structural half (global → `_G[...]` rewriting and local renaming) is applied to the Lua
+ * AST beforehand by `applyLuaMinifyPasses`.
+ *
+ *  - `obfuscate`: scrambles string literals, emits integers as hex, and forces obfuscated bracket access
+ *    for string keys (`t.foo` → `t['\x66...']`).
+ *  - `minify`: removes indentation, comments and the generated header.
+ */
+export class MinifyingLuaPrinter extends LuaPrinter {
+    protected minifyEnabled: boolean;
+    protected obfuscateEnabled: boolean;
+
+    constructor(emitHost: EmitHost, program: ts.Program, sourceFile: string) {
+        super(emitHost, program, sourceFile);
+        const options = program.getCompilerOptions() as CompilerOptions;
+        this.minifyEnabled = options.minify ?? false;
+        this.obfuscateEnabled = options.obfuscate ?? false;
+        if (this.minifyEnabled) {
+            // Suppress the generated header through the existing printFile logic.
+            this.options = { ...this.options, noHeader: true };
+        }
+    }
+
+    // ---- obfuscate (lexical, zero runtime cost) ----
+
+    public printStringLiteral(expression: lua.StringLiteral): SourceNode {
+        if (this.obfuscateEnabled) {
+            const luaTarget = this.options.luaTarget ?? LuaTarget.Universal;
+            return this.createSourceNode(expression, obfuscateLuaString(expression.value, luaTarget));
+        }
+        return super.printStringLiteral(expression);
+    }
+
+    public printNumericLiteral(expression: lua.NumericLiteral): SourceNode {
+        if (
+            this.obfuscateEnabled &&
+            !expression.isFloat &&
+            Number.isInteger(expression.value) &&
+            expression.value >= 0 &&
+            Number.isSafeInteger(expression.value)
+        ) {
+            return this.createSourceNode(expression, `0x${expression.value.toString(16)}`);
+        }
+        return super.printNumericLiteral(expression);
+    }
+
+    // tstl-internal names (lualib helpers, generated locals). These must stay as readable dot-access
+    // because tstl re-scans the emitted text for them — e.g. findUsedLualibFeatures matches the
+    // `local X = ____lualib.X` import lines via regex to build the require-minimal lualib bundle.
+    private static isInternalName(value: string): boolean {
+        return value.startsWith("__TS__") || value.startsWith("____");
+    }
+
+    public printTableIndexExpression(expression: lua.TableIndexExpression): SourceNode {
+        // `____lualib.X` accesses must stay as readable dot-syntax: findUsedLualibFeatures scans the
+        // emitted text for `local X = ____lualib.X` to decide which lualib features to bundle. Obfuscating
+        // the key to bracket form hides it from that regex, the feature is dropped, and `____lualib.X`
+        // resolves to nil at runtime.
+        const isLualibAccess = lua.isIdentifier(expression.table) && expression.table.text === "____lualib";
+        if (
+            this.obfuscateEnabled &&
+            lua.isStringLiteral(expression.index) &&
+            !MinifyingLuaPrinter.isInternalName(expression.index.value) &&
+            !isLualibAccess
+        ) {
+            // Force bracket form so the (scrambled) key string is used instead of dot syntax.
+            return this.createSourceNode(expression, [
+                this.printExpressionInParenthesesIfNeeded(expression.table),
+                "[",
+                this.printExpression(expression.index),
+                "]",
+            ]);
+        }
+        return super.printTableIndexExpression(expression);
+    }
+
+    public printTableFieldExpression(expression: lua.TableFieldExpression): SourceNode {
+        if (
+            this.obfuscateEnabled &&
+            expression.key &&
+            lua.isStringLiteral(expression.key) &&
+            !MinifyingLuaPrinter.isInternalName(expression.key.value)
+        ) {
+            return this.createSourceNode(expression, [
+                "[",
+                this.printExpression(expression.key),
+                "] = ",
+                this.printExpression(expression.value),
+            ]);
+        }
+        return super.printTableFieldExpression(expression);
+    }
+
+    public printCallExpression(expression: lua.CallExpression): SourceNode {
+        // `require(...)` paths must stay verbatim: module resolution and bundling read them back out of
+        // the emitted Lua text (see findLuaRequires), so obfuscating the path string would break them.
+        const pathParam = expression.params[0];
+        if (
+            this.obfuscateEnabled &&
+            lua.isIdentifier(expression.expression) &&
+            expression.expression.text === "require" &&
+            pathParam !== undefined &&
+            lua.isStringLiteral(pathParam)
+        ) {
+            const chunks: SourceChunk[] = [this.printExpressionInParenthesesIfNeeded(expression.expression), "("];
+            chunks.push(this.createSourceNode(pathParam, escapeString(pathParam.value)));
+            for (const param of expression.params.slice(1)) chunks.push(", ", this.printExpression(param));
+            chunks.push(")");
+            return this.createSourceNode(expression, chunks);
+        }
+        return super.printCallExpression(expression);
+    }
+
+    // ---- minify (whitespace / comments) ----
+
+    protected pushIndent(): void {
+        if (!this.minifyEnabled) super.pushIndent();
+    }
+
+    protected popIndent(): void {
+        if (!this.minifyEnabled) super.popIndent();
+    }
+
+    protected indent(input: SourceChunk = ""): SourceChunk {
+        return this.minifyEnabled ? input : super.indent(input);
+    }
+
+    public printStatement(statement: lua.Statement): SourceNode {
+        if (this.minifyEnabled) {
+            return this.printStatementExcludingComments(statement);
+        }
+        return super.printStatement(statement);
+    }
+
+    protected isSimpleExpressionList(expressions: lua.Expression[]): boolean {
+        return this.minifyEnabled ? true : super.isSimpleExpressionList(expressions);
     }
 }

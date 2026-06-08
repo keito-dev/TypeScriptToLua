@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LuaPrinter = exports.tstlHeader = exports.escapeString = void 0;
+exports.MinifyingLuaPrinter = exports.LuaPrinter = exports.tstlHeader = exports.escapeString = void 0;
 exports.createPrinter = createPrinter;
 const path = __importStar(require("path"));
 const source_map_1 = require("source-map");
@@ -42,6 +42,7 @@ const lua = __importStar(require("./LuaAST"));
 const LuaLib_1 = require("./LuaLib");
 const safe_names_1 = require("./transformation/utils/safe-names");
 const transpilation_1 = require("./transpilation");
+const minify_1 = require("./transpilation/minify");
 const utils_1 = require("./utils");
 // https://www.lua.org/pil/2.4.html
 // https://www.ecma-international.org/ecma-262/10.0/index.html#table-34
@@ -96,7 +97,13 @@ function isSimpleExpression(expression) {
 }
 function createPrinter(printers) {
     if (printers.length === 0) {
-        return (program, emitHost, fileName, file) => new LuaPrinter(emitHost, program, fileName).print(file);
+        return (program, emitHost, fileName, file) => {
+            const options = program.getCompilerOptions();
+            const printer = options.minify || options.obfuscate
+                ? new MinifyingLuaPrinter(emitHost, program, fileName)
+                : new LuaPrinter(emitHost, program, fileName);
+            return printer.print(file);
+        };
     }
     else if (printers.length === 1) {
         return printers[0];
@@ -786,4 +793,125 @@ LuaPrinter.operatorPrecedence = {
 };
 LuaPrinter.rightAssociativeOperators = new Set([lua.SyntaxKind.ConcatOperator, lua.SyntaxKind.PowerOperator]);
 LuaPrinter.sourceMapTracebackPlaceholder = "{#SourceMapTraceback}";
+/**
+ * A LuaPrinter that applies the lexical (print-time, zero runtime cost) half of the minify/obfuscate
+ * feature. The structural half (global → `_G[...]` rewriting and local renaming) is applied to the Lua
+ * AST beforehand by `applyLuaMinifyPasses`.
+ *
+ *  - `obfuscate`: scrambles string literals, emits integers as hex, and forces obfuscated bracket access
+ *    for string keys (`t.foo` → `t['\x66...']`).
+ *  - `minify`: removes indentation, comments and the generated header.
+ */
+class MinifyingLuaPrinter extends LuaPrinter {
+    constructor(emitHost, program, sourceFile) {
+        var _a, _b;
+        super(emitHost, program, sourceFile);
+        const options = program.getCompilerOptions();
+        this.minifyEnabled = (_a = options.minify) !== null && _a !== void 0 ? _a : false;
+        this.obfuscateEnabled = (_b = options.obfuscate) !== null && _b !== void 0 ? _b : false;
+        if (this.minifyEnabled) {
+            // Suppress the generated header through the existing printFile logic.
+            this.options = { ...this.options, noHeader: true };
+        }
+    }
+    // ---- obfuscate (lexical, zero runtime cost) ----
+    printStringLiteral(expression) {
+        var _a;
+        if (this.obfuscateEnabled) {
+            const luaTarget = (_a = this.options.luaTarget) !== null && _a !== void 0 ? _a : CompilerOptions_1.LuaTarget.Universal;
+            return this.createSourceNode(expression, (0, minify_1.obfuscateLuaString)(expression.value, luaTarget));
+        }
+        return super.printStringLiteral(expression);
+    }
+    printNumericLiteral(expression) {
+        if (this.obfuscateEnabled &&
+            !expression.isFloat &&
+            Number.isInteger(expression.value) &&
+            expression.value >= 0 &&
+            Number.isSafeInteger(expression.value)) {
+            return this.createSourceNode(expression, `0x${expression.value.toString(16)}`);
+        }
+        return super.printNumericLiteral(expression);
+    }
+    // tstl-internal names (lualib helpers, generated locals). These must stay as readable dot-access
+    // because tstl re-scans the emitted text for them — e.g. findUsedLualibFeatures matches the
+    // `local X = ____lualib.X` import lines via regex to build the require-minimal lualib bundle.
+    static isInternalName(value) {
+        return value.startsWith("__TS__") || value.startsWith("____");
+    }
+    printTableIndexExpression(expression) {
+        // `____lualib.X` accesses must stay as readable dot-syntax: findUsedLualibFeatures scans the
+        // emitted text for `local X = ____lualib.X` to decide which lualib features to bundle. Obfuscating
+        // the key to bracket form hides it from that regex, the feature is dropped, and `____lualib.X`
+        // resolves to nil at runtime.
+        const isLualibAccess = lua.isIdentifier(expression.table) && expression.table.text === "____lualib";
+        if (this.obfuscateEnabled &&
+            lua.isStringLiteral(expression.index) &&
+            !MinifyingLuaPrinter.isInternalName(expression.index.value) &&
+            !isLualibAccess) {
+            // Force bracket form so the (scrambled) key string is used instead of dot syntax.
+            return this.createSourceNode(expression, [
+                this.printExpressionInParenthesesIfNeeded(expression.table),
+                "[",
+                this.printExpression(expression.index),
+                "]",
+            ]);
+        }
+        return super.printTableIndexExpression(expression);
+    }
+    printTableFieldExpression(expression) {
+        if (this.obfuscateEnabled &&
+            expression.key &&
+            lua.isStringLiteral(expression.key) &&
+            !MinifyingLuaPrinter.isInternalName(expression.key.value)) {
+            return this.createSourceNode(expression, [
+                "[",
+                this.printExpression(expression.key),
+                "] = ",
+                this.printExpression(expression.value),
+            ]);
+        }
+        return super.printTableFieldExpression(expression);
+    }
+    printCallExpression(expression) {
+        // `require(...)` paths must stay verbatim: module resolution and bundling read them back out of
+        // the emitted Lua text (see findLuaRequires), so obfuscating the path string would break them.
+        const pathParam = expression.params[0];
+        if (this.obfuscateEnabled &&
+            lua.isIdentifier(expression.expression) &&
+            expression.expression.text === "require" &&
+            pathParam !== undefined &&
+            lua.isStringLiteral(pathParam)) {
+            const chunks = [this.printExpressionInParenthesesIfNeeded(expression.expression), "("];
+            chunks.push(this.createSourceNode(pathParam, (0, exports.escapeString)(pathParam.value)));
+            for (const param of expression.params.slice(1))
+                chunks.push(", ", this.printExpression(param));
+            chunks.push(")");
+            return this.createSourceNode(expression, chunks);
+        }
+        return super.printCallExpression(expression);
+    }
+    // ---- minify (whitespace / comments) ----
+    pushIndent() {
+        if (!this.minifyEnabled)
+            super.pushIndent();
+    }
+    popIndent() {
+        if (!this.minifyEnabled)
+            super.popIndent();
+    }
+    indent(input = "") {
+        return this.minifyEnabled ? input : super.indent(input);
+    }
+    printStatement(statement) {
+        if (this.minifyEnabled) {
+            return this.printStatementExcludingComments(statement);
+        }
+        return super.printStatement(statement);
+    }
+    isSimpleExpressionList(expressions) {
+        return this.minifyEnabled ? true : super.isSimpleExpressionList(expressions);
+    }
+}
+exports.MinifyingLuaPrinter = MinifyingLuaPrinter;
 //# sourceMappingURL=LuaPrinter.js.map

@@ -70,8 +70,8 @@ export declare class LuaPrinter {
     printTableExpression(expression: lua.TableExpression): SourceNode;
     printUnaryExpression(expression: lua.UnaryExpression): SourceNode;
     printBinaryExpression(expression: lua.BinaryExpression): SourceNode;
-    private printExpressionInParenthesesIfNeeded;
-    private needsParenthesis;
+    protected printExpressionInParenthesesIfNeeded(expression: lua.Expression, minPrecedenceToOmit?: number): SourceNode;
+    protected needsParenthesis(expression: lua.Expression, minPrecedenceToOmit?: number): boolean;
     printCallExpression(expression: lua.CallExpression): SourceNode;
     printMethodCallExpression(expression: lua.MethodCallExpression): SourceNode;
     printIdentifier(expression: lua.Identifier): SourceNode;
@@ -86,5 +86,30 @@ export declare class LuaPrinter {
     protected isSimpleExpressionList(expressions: lua.Expression[]): boolean;
     protected printExpressionList(expressions: lua.Expression[]): SourceChunk[];
     private buildSourceMap;
+}
+/**
+ * A LuaPrinter that applies the lexical (print-time, zero runtime cost) half of the minify/obfuscate
+ * feature. The structural half (global → `_G[...]` rewriting and local renaming) is applied to the Lua
+ * AST beforehand by `applyLuaMinifyPasses`.
+ *
+ *  - `obfuscate`: scrambles string literals, emits integers as hex, and forces obfuscated bracket access
+ *    for string keys (`t.foo` → `t['\x66...']`).
+ *  - `minify`: removes indentation, comments and the generated header.
+ */
+export declare class MinifyingLuaPrinter extends LuaPrinter {
+    protected minifyEnabled: boolean;
+    protected obfuscateEnabled: boolean;
+    constructor(emitHost: EmitHost, program: ts.Program, sourceFile: string);
+    printStringLiteral(expression: lua.StringLiteral): SourceNode;
+    printNumericLiteral(expression: lua.NumericLiteral): SourceNode;
+    private static isInternalName;
+    printTableIndexExpression(expression: lua.TableIndexExpression): SourceNode;
+    printTableFieldExpression(expression: lua.TableFieldExpression): SourceNode;
+    printCallExpression(expression: lua.CallExpression): SourceNode;
+    protected pushIndent(): void;
+    protected popIndent(): void;
+    protected indent(input?: SourceChunk): SourceChunk;
+    printStatement(statement: lua.Statement): SourceNode;
+    protected isSimpleExpressionList(expressions: lua.Expression[]): boolean;
 }
 export {};

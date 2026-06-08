@@ -4,6 +4,7 @@ import { CompilerOptions, validateOptions } from "../CompilerOptions";
 import { createPrinter } from "../LuaPrinter";
 import { createVisitorMap, transformSourceFile } from "../transformation";
 import { isNonNull } from "../utils";
+import { applyLuaMinifyPasses } from "./minify";
 import { Plugin } from "./plugins";
 import { getTransformers } from "./transformers";
 import { EmitHost, ProcessedFile } from "./utils";
@@ -83,6 +84,10 @@ export function getProgramTranspileResult(
 
         const { file, diagnostics: transformDiagnostics } = transformSourceFile(program, sourceFile, visitorMap);
         diagnostics.push(...transformDiagnostics);
+
+        if (options.minify || options.obfuscate) {
+            applyLuaMinifyPasses(file, options, emitHost);
+        }
 
         performance.endSection("transpile");
 

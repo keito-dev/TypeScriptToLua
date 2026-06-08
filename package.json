@@ -46,7 +46,9 @@
     },
     "dependencies": {
         "@typescript-to-lua/language-extensions": "1.19.0",
+        "@wolfe-labs/luamin": "^1.54.0",
         "enhanced-resolve": "5.8.2",
+        "luaparse": "^0.3.1",
         "picomatch": "^2.3.1",
         "resolve": "^1.15.1",
         "source-map": "^0.7.3"
